@@ -1,4 +1,4 @@
-# Huggingface Picotron 4D并行框架（教育版）源码学习
+# Picotron 学习笔记
 
 本项目是Picotron的深度学习笔记集合，旨在帮助理解分布式训练和LLM训练的核心概念。
 
