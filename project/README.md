@@ -13,6 +13,7 @@
 
 ```c
 python -m pytest tests/unit/test_parallel/test_moe_basic.py -v --tb=short
+python -m pytest tests/unit/test_parallel/test_three_d_basic.py -v
 
 ```
 

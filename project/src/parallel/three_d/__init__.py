@@ -37,8 +37,14 @@ except ImportError:
             self.modules = list(args)
     
     class ModuleList:
-        def __init__(self, modules):
-            self.modules = modules
+        def __init__(self, modules=None):
+            self.modules = modules or []
+        
+        def append(self, module):
+            self.modules.append(module)
+        
+        def __iter__(self):
+            return iter(self.modules)
     
     # 创建兼容的torch模块
     class MockTorch:
@@ -229,14 +235,11 @@ class PipelineParallelOptimizer:
         # 简单的1F1B调度
         pipeline_stages = []
         layers_per_stage = num_layers // self.pipeline_parallel_size
+        remainder = num_layers % self.pipeline_parallel_size
         
         for stage in range(self.pipeline_parallel_size):
-            start_layer = stage * layers_per_stage
-            end_layer = start_layer + layers_per_stage
-            
-            if stage == self.pipeline_parallel_size - 1:
-                # 最后一个阶段处理所有剩余层
-                end_layer = num_layers
+            start_layer = stage * layers_per_stage + min(stage, remainder)
+            end_layer = start_layer + layers_per_stage + (1 if stage < remainder else 0)
             
             pipeline_stages.append({
                 'stage_id': stage,
@@ -486,8 +489,9 @@ class ThreeDParallelOptimizer:
         # 3. 计算损失
         loss = self.compute_loss(output, local_batch)
         
-        # 4. 反向传播
-        loss.backward()
+        # 4. 反向传播（兼容性处理）
+        if hasattr(loss, 'backward'):
+            loss.backward()
         
         # 5. 梯度同步
         self.data_optimizer.all_reduce_gradients(model)
@@ -514,6 +518,11 @@ class ThreeDParallelOptimizer:
         # 简化的流水线前向传播
         # 实际实现需要处理微批次和通信
         
+        # 如果没有pipeline_schedule，创建一个
+        if not hasattr(self, 'pipeline_schedule'):
+            num_layers = len(list(model.modules()))
+            self.pipeline_schedule = self.pipeline_optimizer.create_pipeline_schedule(num_layers)
+        
         activations = []
         current_input = batch
         
@@ -522,9 +531,10 @@ class ThreeDParallelOptimizer:
             
             # 执行当前阶段的所有层
             for layer_idx in stage_layers:
-                layer = list(model.modules())[layer_idx]
-                if hasattr(layer, 'forward'):
-                    current_input = layer(current_input)
+                if layer_idx < len(list(model.modules())):
+                    layer = list(model.modules())[layer_idx]
+                    if hasattr(layer, 'forward'):
+                        current_input = layer(current_input)
             
             # 如果不是最后一个阶段，发送激活值
             if not stage_info['is_last']:
@@ -614,6 +624,17 @@ class ThreeDParallelModel(Module):
         for layer in self.layers:
             x = layer(x)
         return x
+    
+    def named_modules(self):
+        """获取所有命名模块"""
+        modules = []
+        for i, layer in enumerate(self.layers):
+            modules.append((f"layers.{i}", layer))
+        return modules
+    
+    def modules(self):
+        """获取所有模块"""
+        return self.layers
 
 
 __all__ = [
